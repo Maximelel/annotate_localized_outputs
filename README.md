@@ -31,6 +31,8 @@ A web-based tool for annotating Large Language Model (LLM) outputs with a WhatsA
 1. **Clone the repository**:
    ```bash
    git clone https://github.com/Maximelel/annotate_localized_outputs.git
+   ```
+   ```bash
    cd annotate_localized_outputs
    ```
 
