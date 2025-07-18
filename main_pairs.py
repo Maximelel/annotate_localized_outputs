@@ -49,20 +49,18 @@ def render_upload_page(error=None):
 def render_annotation_page():
     idx = session_state['current_index']
     total = session_state['total_rows']
-    data = session_state['data_rows'][idx] if total > 0 else {'UserQuestion': '', 'ModelAnswer': ''}
+    data = session_state['data_rows'][idx] if total > 0 else {'UserQuestion': '', 'ModelAnswer1': '', 'ModelAnswer2': ''}
     annotations = session_state['annotations']
     prev_ann = annotations[idx] if idx < len(annotations) else {}
-    def get_rating(crit):
-        return prev_ann.get(crit + '_rating', '')
-    def get_comment(crit):
-        return prev_ann.get(crit + '_comment', '')
-    
+    def get_choice(crit):
+        return prev_ann.get(crit + '_winner', '')
+    def get_comment():
+        return prev_ann.get('Comments', '')
     # Calculate progress - count only completed annotations (not skipped)
-    completed_count = sum(1 for ann in session_state['annotations'] if any(ann.get(f'{crit}_rating') for crit in ['Localization', 'Pedagogy', 'Helpfulness']))
-    skipped_count = sum(1 for ann in session_state['annotations'] if not any(ann.get(f'{crit}_rating') for crit in ['Localization', 'Pedagogy', 'Helpfulness']) and any(ann))
+    completed_count = sum(1 for ann in session_state['annotations'] if any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'Actionability', 'CommunicationStyle']))
+    skipped_count = sum(1 for ann in session_state['annotations'] if not any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'Actionability', 'CommunicationStyle']) and any(ann))
     progress_percentage = (completed_count / total * 100) if total > 0 else 0
     remaining = total - completed_count
-    
     return f"""
     <!DOCTYPE html>
     <html lang='en'>
@@ -87,57 +85,71 @@ def render_annotation_page():
                 </div>
             </div>
             <div class='bg-white rounded-lg shadow p-6 mb-6'>
-                <div class='flex flex-col gap-4'>
-                    <div class='flex'>
-                        <div class='bg-gray-200 text-gray-800 rounded-2xl px-4 py-2 max-w-[98%]'>
-                            <span class='font-semibold'>User:</span> {data.get('UserQuestion', '').replace(chr(10), '<br>').replace(chr(13), '<br>')}
+                <div class='mb-4'>
+                    <div class='font-semibold mb-2'>User:</div>
+                    <div class='bg-gray-200 text-gray-800 rounded-2xl px-4 py-2 max-w-[98%] mb-4'>{data.get('UserQuestion', '').replace(chr(10), '<br>').replace(chr(13), '<br>')}</div>
+                    <div class='grid grid-cols-2 gap-6'>
+                        <div class='flex flex-col'>
+                            <div class='font-semibold mb-1 text-center'>LLM 1</div>
+                            <div class='bg-green-100 text-green-900 rounded-2xl px-6 py-2 min-h-[40px] max-w-[95%]'>{data.get('ModelAnswer1', '').replace(chr(10), '<br>').replace(chr(13), '<br>')}</div>
                         </div>
-                    </div>
-                    <div class='flex justify-end'>
-                        <div class='bg-green-100 text-green-900 rounded-2xl px-4 py-2 max-w-[98%]'>
-                            <span class='font-semibold'>LLM:</span> {data.get('ModelAnswer', '').replace(chr(10), '<br>').replace(chr(13), '<br>')}
+                        <div class='flex flex-col'>
+                            <div class='font-semibold mb-1 text-center'>LLM 2</div>
+                            <div class='bg-blue-100 text-blue-900 rounded-2xl px-6 py-2 min-h-[40px] max-w-[95%]'>{data.get('ModelAnswer2', '').replace(chr(10), '<br>').replace(chr(13), '<br>')}</div>
                         </div>
                     </div>
                 </div>
             </div>
             <form id='annotationForm' class='bg-white rounded-lg shadow p-6 flex flex-col gap-6'>
                 <input type='hidden' name='index' id='index' value='{idx}'>
-                {render_rubric(get_rating, get_comment)}
+                {render_pairwise_rubric(get_choice)}
+                <div class='mb-4'>
+                    <label for='Comments' class='block font-semibold mb-1'>Comments <span class='text-gray-500 text-xs'>(optional)</span></label>
+                    <textarea id='Comments' name='Comments' class='border rounded p-2 w-full text-sm' rows='2' placeholder='Add any comments here (optional)'>{get_comment()}</textarea>
+                </div>
                 <div class='flex justify-between items-center mt-4'>
                     {render_previous_button(idx)}
                     <div class='flex gap-2'>
                         <button type='button' onclick='skipAnnotation()' class='bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600'>Skip</button>
                         <button type='button' onclick='submitAnnotation()' id='nextButton' class='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600' disabled>Next</button>
                     </div>
-                    <button type='button' onclick='finishAnnotation()' class='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'>Finish and Save</button>
+                    <button type='button' onclick='showFinishConfirm()' class='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'>Finish and Save</button>
                 </div>
             </form>
+            <!-- Modal for Finish Confirmation -->
+            <div id="finishConfirmModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
+                <div class="bg-white rounded-lg shadow-lg p-8 max-w-sm w-full flex flex-col items-center">
+                    <h2 class="text-xl font-bold mb-4 text-center">Are you sure you want to finish and save?</h2>
+                    <div class="flex gap-4 mt-2">
+                        <button onclick="confirmFinishYes()" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600">Yes, Finish</button>
+                        <button onclick="confirmFinishNo()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">No, Go Back</button>
+                    </div>
+                </div>
+            </div>
         </div>
         <script>
-        let ratings = {{}};
-        function handleRatingClick(criterion, value) {{
-            ratings[criterion] = value;
-            for (const v of ['Good','Neutral','Bad']) {{
-                let btn = document.getElementById(criterion + '_' + v);
-                if (btn) btn.classList.remove('ring-2','ring-green-500','ring-gray-400','ring-red-500');
+        let choices = {{}};
+        function handlePairwiseClick(criterion, value) {{
+            choices[criterion] = value;
+            let btn1 = document.getElementById(criterion + '_LLM_1');
+            let btn2 = document.getElementById(criterion + '_LLM_2');
+            btn1.classList.remove('ring-2','ring-green-500','ring-blue-500');
+            btn2.classList.remove('ring-2','ring-green-500','ring-blue-500');
+            if (value === 'LLM_1') {{
+                btn1.classList.add('ring-2','ring-green-500');
+            }} else if (value === 'LLM_2') {{
+                btn2.classList.add('ring-2','ring-blue-500');
             }}
-            let btn = document.getElementById(criterion + '_' + value);
-            if (btn) {{
-                if (value === 'Good') btn.classList.add('ring-2','ring-green-500');
-                else if (value === 'Neutral') btn.classList.add('ring-2','ring-gray-400');
-                else if (value === 'Bad') btn.classList.add('ring-2','ring-red-500');
-            }}
-            document.getElementById(criterion + '_rating').value = value;
+            document.getElementById(criterion + '_winner').value = value;
             checkNextButton();
         }}
-        
         function checkNextButton() {{
-            const localizationRating = document.getElementById('Localization_rating').value;
-            const pedagogyRating = document.getElementById('Pedagogy_rating').value;
-            const helpfulnessRating = document.getElementById('Helpfulness_rating').value;
+            const cr = document.getElementById('ContextualRelevance_winner').value;
+            const pq = document.getElementById('PedagogicalQuality_winner').value;
+            const ac = document.getElementById('Actionability_winner').value;
+            const cs = document.getElementById('CommunicationStyle_winner').value;
             const nextButton = document.getElementById('nextButton');
-            
-            if (localizationRating && pedagogyRating && helpfulnessRating) {{
+            if (cr && pq && ac && cs) {{
                 nextButton.disabled = false;
                 nextButton.classList.remove('opacity-50', 'cursor-not-allowed');
                 nextButton.classList.add('hover:bg-green-600');
@@ -147,8 +159,6 @@ def render_annotation_page():
                 nextButton.classList.remove('hover:bg-green-600');
             }}
         }}
-        
-        // Check on page load
         document.addEventListener('DOMContentLoaded', function() {{
             checkNextButton();
         }});
@@ -156,12 +166,11 @@ def render_annotation_page():
             let index = parseInt(document.getElementById('index').value);
             let payload = {{
                 index: index,
-                Localization_rating: document.getElementById('Localization_rating').value,
-                Localization_comment: document.getElementById('Localization_comment').value,
-                Pedagogy_rating: document.getElementById('Pedagogy_rating').value,
-                Pedagogy_comment: document.getElementById('Pedagogy_comment').value,
-                Helpfulness_rating: document.getElementById('Helpfulness_rating').value,
-                Helpfulness_comment: document.getElementById('Helpfulness_comment').value,
+                ContextualRelevance_winner: document.getElementById('ContextualRelevance_winner').value,
+                PedagogicalQuality_winner: document.getElementById('PedagogicalQuality_winner').value,
+                Actionability_winner: document.getElementById('Actionability_winner').value,
+                CommunicationStyle_winner: document.getElementById('CommunicationStyle_winner').value,
+                Comments: document.getElementById('Comments').value
             }};
             let resp = await fetch('/api/annotate', {{
                 method: 'POST',
@@ -184,17 +193,15 @@ def render_annotation_page():
                 window.location.href = '/annotate';
             }}
         }}
-        
         async function skipAnnotation() {{
             let index = parseInt(document.getElementById('index').value);
             let payload = {{
                 index: index,
-                Localization_rating: '',
-                Localization_comment: '',
-                Pedagogy_rating: '',
-                Pedagogy_comment: '',
-                Helpfulness_rating: '',
-                Helpfulness_comment: '',
+                ContextualRelevance_winner: '',
+                PedagogicalQuality_winner: '',
+                Actionability_winner: '',
+                CommunicationStyle_winner: '',
+                Comments: ''
             }};
             let resp = await fetch('/api/annotate', {{
                 method: 'POST',
@@ -206,17 +213,21 @@ def render_annotation_page():
                 navigate('next');
             }}
         }}
-        
-        async function finishAnnotation() {{
+        // Show confirmation modal for Finish and Save
+        function showFinishConfirm() {{
+            document.getElementById('finishConfirmModal').classList.remove('hidden');
+        }}
+        // If user confirms, proceed to finish
+        async function confirmFinishYes() {{
+            document.getElementById('finishConfirmModal').classList.add('hidden');
             let index = parseInt(document.getElementById('index').value);
             let payload = {{
                 index: index,
-                Localization_rating: document.getElementById('Localization_rating').value,
-                Localization_comment: document.getElementById('Localization_comment').value,
-                Pedagogy_rating: document.getElementById('Pedagogy_rating').value,
-                Pedagogy_comment: document.getElementById('Pedagogy_comment').value,
-                Helpfulness_rating: document.getElementById('Helpfulness_rating').value,
-                Helpfulness_comment: document.getElementById('Helpfulness_comment').value,
+                ContextualRelevance_winner: document.getElementById('ContextualRelevance_winner').value,
+                PedagogicalQuality_winner: document.getElementById('PedagogicalQuality_winner').value,
+                Actionability_winner: document.getElementById('Actionability_winner').value,
+                CommunicationStyle_winner: document.getElementById('CommunicationStyle_winner').value,
+                Comments: document.getElementById('Comments').value
             }};
             let resp = await fetch('/api/annotate', {{
                 method: 'POST',
@@ -228,31 +239,34 @@ def render_annotation_page():
                 window.location.href = '/finish';
             }}
         }}
+        // If user cancels, hide modal and stay on annotation
+        function confirmFinishNo() {{
+            document.getElementById('finishConfirmModal').classList.add('hidden');
+        }}
         </script>
     </body>
     </html>
     """
 
-def render_rubric(get_rating, get_comment):
-    criteria = [
-        ('Localization', 'How well is the answer localized?'),
-        ('Pedagogy', 'Is the answer pedagogically relevant?'),
-        ('Helpfulness', 'How helpful is the answer?'),
+def render_pairwise_rubric(get_choice):
+    rubric = [
+        ('ContextualRelevance', 'Contextual Relevance', 'How well does the answer fit the local educational environment?'),
+        ('PedagogicalQuality', 'Pedagogical Quality', 'How effective is the teaching advice?'),
+        ('Actionability', 'Actionability', 'How easy is it for a teacher to implement the advice?'),
+        ('CommunicationStyle', 'Communication Style', 'How does the chatbot communicate (Tone, Persona)?')
     ]
-    btns = []
-    for crit, desc in criteria:
-        btns.append(f"""
-        <div>
-            <div class='mb-1 font-semibold'>{crit} <span class='text-gray-500 text-xs'>({desc})</span></div>
-            <div class='flex items-center gap-2 mb-2'>
-                <input type='hidden' id='{crit}_rating' name='{crit}_rating' value='{get_rating(crit)}'>
-                <button type='button' id='{crit}_Good' onclick='handleRatingClick("{crit}","Good")' class='px-3 py-1 rounded bg-green-100 text-green-800 border border-green-300 {"ring-2 ring-green-500" if get_rating(crit)=="Good" else ""}'>Good</button>
-                <button type='button' id='{crit}_Neutral' onclick='handleRatingClick("{crit}","Neutral")' class='px-3 py-1 rounded bg-gray-100 text-gray-800 border border-gray-300 {"ring-2 ring-gray-400" if get_rating(crit)=="Neutral" else ""}'>Neutral</button>
-                <button type='button' id='{crit}_Bad' onclick='handleRatingClick("{crit}","Bad")' class='px-3 py-1 rounded bg-red-100 text-red-800 border border-red-300 {"ring-2 ring-red-500" if get_rating(crit)=="Bad" else ""}'>Bad</button>
-                <input type='text' id='{crit}_comment' name='{crit}_comment' value='{get_comment(crit)}' placeholder='Comment (optional)' class='ml-4 border rounded p-1 flex-1 text-sm' style='min-width:120px;'>
-            </div>
-        </div>
-        """)
+    btns = ["<div class='flex flex-col gap-4'>"]
+    for crit, label, expl in rubric:
+        btns.append(
+            f"<div>"
+            f"<div class='mb-1 font-semibold'>{label}: <span class='font-normal text-gray-600'>{expl}</span></div>"
+            f"<div class='flex items-center gap-4 mb-2'>"
+            f"<input type='hidden' id='{crit}_winner' name='{crit}_winner' value='{get_choice(crit)}'>"
+            f"<button type='button' id='{crit}_LLM_1' onclick=\"handlePairwiseClick('{crit}','LLM_1')\" class='px-4 py-1 rounded border bg-green-50 border-green-300 {'ring-2 ring-green-500' if get_choice(crit)=='LLM_1' else ''}'>LLM 1</button>"
+            f"<button type='button' id='{crit}_LLM_2' onclick=\"handlePairwiseClick('{crit}','LLM_2')\" class='px-4 py-1 rounded border bg-blue-50 border-blue-300 {'ring-2 ring-blue-500' if get_choice(crit)=='LLM_2' else ''}'>LLM 2</button>"
+            f"</div></div>"
+        )
+    btns.append("</div>")
     return "".join(btns)
 
 def render_previous_button(idx):
@@ -391,7 +405,7 @@ async def upload(file: UploadFile = File(...)):
         return HTMLResponse(render_upload_page(error='Invalid CSV file. Please check the file format.'), status_code=400)
     
     # Check for required columns with exact name matching
-    required_columns = ['UserQuestion', 'ModelAnswer']
+    required_columns = ['UserQuestion', 'ModelAnswer1', 'ModelAnswer2']
     missing_columns = []
     available_columns = list(df.columns)
     
@@ -425,19 +439,16 @@ def annotate():
 async def api_annotate(request: Request):
     data = await request.json()
     idx = data.get('index', 0)
-    # Save annotation
     ann = {
-        'Localization_rating': data.get('Localization_rating',''),
-        'Localization_comment': data.get('Localization_comment',''),
-        'Pedagogy_rating': data.get('Pedagogy_rating',''),
-        'Pedagogy_comment': data.get('Pedagogy_comment',''),
-        'Helpfulness_rating': data.get('Helpfulness_rating',''),
-        'Helpfulness_comment': data.get('Helpfulness_comment',''),
+        'ContextualRelevance_winner': data.get('ContextualRelevance_winner',''),
+        'PedagogicalQuality_winner': data.get('PedagogicalQuality_winner',''),
+        'Actionability_winner': data.get('Actionability_winner',''),
+        'CommunicationStyle_winner': data.get('CommunicationStyle_winner',''),
+        'Comments': data.get('Comments',''),
     }
     if idx < len(session_state['annotations']):
         session_state['annotations'][idx] = ann
     else:
-        # Should not happen, but append if needed
         session_state['annotations'].append(ann)
     return {"status": "success"}
 
@@ -454,8 +465,8 @@ async def api_navigate(request: Request):
         if idx > 0:
             session_state['current_index'] -= 1
     idx = session_state['current_index']
-    row = session_state['data_rows'][idx] if total > 0 else {'UserQuestion': '', 'ModelAnswer': ''}
-    return {'index': idx, 'question': row.get('UserQuestion',''), 'answer': row.get('ModelAnswer','')}
+    row = session_state['data_rows'][idx] if total > 0 else {'UserQuestion': '', 'ModelAnswer1': '', 'ModelAnswer2': ''}
+    return {'index': idx, 'question': row.get('UserQuestion',''), 'answer': row.get('ModelAnswer1','')}
 
 @app.get("/finish", response_class=HTMLResponse)
 def finish():
