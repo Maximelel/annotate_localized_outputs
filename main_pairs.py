@@ -133,12 +133,16 @@ def render_annotation_page():
             choices[criterion] = value;
             let btn1 = document.getElementById(criterion + '_LLM_1');
             let btn2 = document.getElementById(criterion + '_LLM_2');
-            btn1.classList.remove('ring-2','ring-green-500','ring-blue-500');
-            btn2.classList.remove('ring-2','ring-green-500','ring-blue-500');
+            let btnNoPref = document.getElementById(criterion + '_NO_PREF');
+            btn1.classList.remove('ring-2','ring-green-500','ring-blue-500','ring-gray-400');
+            btn2.classList.remove('ring-2','ring-green-500','ring-blue-500','ring-gray-400');
+            btnNoPref.classList.remove('ring-2','ring-green-500','ring-blue-500','ring-gray-400');
             if (value === 'LLM_1') {{
                 btn1.classList.add('ring-2','ring-green-500');
             }} else if (value === 'LLM_2') {{
                 btn2.classList.add('ring-2','ring-blue-500');
+            }} else if (value === 'NO_PREF') {{
+                btnNoPref.classList.add('ring-2','ring-gray-400');
             }}
             document.getElementById(criterion + '_winner').value = value;
             checkNextButton();
@@ -264,6 +268,7 @@ def render_pairwise_rubric(get_choice):
             f"<input type='hidden' id='{crit}_winner' name='{crit}_winner' value='{get_choice(crit)}'>"
             f"<button type='button' id='{crit}_LLM_1' onclick=\"handlePairwiseClick('{crit}','LLM_1')\" class='px-4 py-1 rounded border bg-green-50 border-green-300 {'ring-2 ring-green-500' if get_choice(crit)=='LLM_1' else ''}'>LLM 1</button>"
             f"<button type='button' id='{crit}_LLM_2' onclick=\"handlePairwiseClick('{crit}','LLM_2')\" class='px-4 py-1 rounded border bg-blue-50 border-blue-300 {'ring-2 ring-blue-500' if get_choice(crit)=='LLM_2' else ''}'>LLM 2</button>"
+            f"<button type='button' id='{crit}_NO_PREF' onclick=\"handlePairwiseClick('{crit}','NO_PREF')\" class='px-4 py-1 rounded border bg-gray-100 border-gray-400 text-gray-500 {'ring-2 ring-gray-400' if get_choice(crit)=='NO_PREF' else ''}'>No preference</button>"
             f"</div></div>"
         )
     btns.append("</div>")

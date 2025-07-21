@@ -71,8 +71,6 @@ This tool supports two modes for evaluating LLM outputs:
 
 Choose the mode that matches your evaluation needs!
 
-
-
 ## 🎯 Annotation Criteria
 
 - **Contextual Relevance**: How well does the response fit the user's context? (Excellent, Good, Poor)
