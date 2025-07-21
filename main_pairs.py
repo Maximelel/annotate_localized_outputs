@@ -86,7 +86,7 @@ def render_annotation_page():
             </div>
             <div class='bg-white rounded-lg shadow p-6 mb-6'>
                 <div class='mb-4'>
-                    <div class='font-semibold mb-2'>User:</div>
+                    <div class='font-semibold mb-2'>User{f" ({data.get('AssignedCountry', '').upper()})" if data.get('AssignedCountry', '').strip() else ''}:</div>
                     <div class='bg-gray-200 text-gray-800 rounded-2xl px-4 py-2 max-w-[98%] mb-4'>{data.get('UserQuestion', '').replace(chr(10), '<br>').replace(chr(13), '<br>')}</div>
                     <div class='grid grid-cols-2 gap-6'>
                         <div class='flex flex-col'>
