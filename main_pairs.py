@@ -56,9 +56,12 @@ def render_annotation_page():
         return prev_ann.get(crit + '_winner', '')
     def get_comment():
         return prev_ann.get('Comments', '')
+    def get_issue_checked(llm, issue):
+        return 'checked' if prev_ann.get(f'LLM_{llm}_{issue}', False) else ''
+
     # Calculate progress - count only completed annotations (not skipped)
-    completed_count = sum(1 for ann in session_state['annotations'] if any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'Actionability', 'CommunicationStyle']))
-    skipped_count = sum(1 for ann in session_state['annotations'] if not any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'Actionability', 'CommunicationStyle']) and any(ann))
+    completed_count = sum(1 for ann in session_state['annotations'] if any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'CommunicationStyle']))
+    skipped_count = sum(1 for ann in session_state['annotations'] if not any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'CommunicationStyle']) and any(ann))
     progress_percentage = (completed_count / total * 100) if total > 0 else 0
     remaining = total - completed_count
     return f"""
@@ -102,8 +105,17 @@ def render_annotation_page():
             </div>
             <form id='annotationForm' class='bg-white rounded-lg shadow p-6 flex flex-col gap-6'>
                 <input type='hidden' name='index' id='index' value='{idx}'>
-                {render_pairwise_rubric(get_choice)}
-                <div class='mb-4'>
+                
+                <div class='grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-6'>
+                    <div class='md:col-span-2'>
+                        {render_pairwise_rubric(get_choice)}
+                    </div>
+                    <div class='md:col-span-1'>
+                        {render_common_issues_rubric(get_issue_checked)}
+                    </div>
+                </div>
+
+                <div class='border-t pt-6'>
                     <label for='Comments' class='block font-semibold mb-1'>Comments <span class='text-gray-500 text-xs'>(optional)</span></label>
                     <textarea id='Comments' name='Comments' class='border rounded p-2 w-full text-sm' rows='2' placeholder='Add any comments here (optional)'>{get_comment()}</textarea>
                 </div>
@@ -116,7 +128,6 @@ def render_annotation_page():
                     <button type='button' onclick='showFinishConfirm()' class='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'>Finish and Save</button>
                 </div>
             </form>
-            <!-- Modal for Finish Confirmation -->
             <div id="finishConfirmModal" class="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 hidden">
                 <div class="bg-white rounded-lg shadow-lg p-8 max-w-sm w-full flex flex-col items-center">
                     <h2 class="text-xl font-bold mb-4 text-center">Are you sure you want to finish and save?</h2>
@@ -150,10 +161,9 @@ def render_annotation_page():
         function checkNextButton() {{
             const cr = document.getElementById('ContextualRelevance_winner').value;
             const pq = document.getElementById('PedagogicalQuality_winner').value;
-            const ac = document.getElementById('Actionability_winner').value;
             const cs = document.getElementById('CommunicationStyle_winner').value;
             const nextButton = document.getElementById('nextButton');
-            if (cr && pq && ac && cs) {{
+            if (cr && pq && cs) {{
                 nextButton.disabled = false;
                 nextButton.classList.remove('opacity-50', 'cursor-not-allowed');
                 nextButton.classList.add('hover:bg-green-600');
@@ -172,9 +182,12 @@ def render_annotation_page():
                 index: index,
                 ContextualRelevance_winner: document.getElementById('ContextualRelevance_winner').value,
                 PedagogicalQuality_winner: document.getElementById('PedagogicalQuality_winner').value,
-                Actionability_winner: document.getElementById('Actionability_winner').value,
                 CommunicationStyle_winner: document.getElementById('CommunicationStyle_winner').value,
-                Comments: document.getElementById('Comments').value
+                Comments: document.getElementById('Comments').value,
+                LLM_1_Too_Wordy: document.getElementById('llm1_issue_too_wordy').checked,
+                LLM_1_No_Answer: document.getElementById('llm1_issue_no_answer').checked,
+                LLM_2_Too_Wordy: document.getElementById('llm2_issue_too_wordy').checked,
+                LLM_2_No_Answer: document.getElementById('llm2_issue_no_answer').checked,
             }};
             let resp = await fetch('/api/annotate', {{
                 method: 'POST',
@@ -203,9 +216,12 @@ def render_annotation_page():
                 index: index,
                 ContextualRelevance_winner: '',
                 PedagogicalQuality_winner: '',
-                Actionability_winner: '',
                 CommunicationStyle_winner: '',
-                Comments: ''
+                Comments: '',
+                LLM_1_Too_Wordy: false,
+                LLM_1_No_Answer: false,
+                LLM_2_Too_Wordy: false,
+                LLM_2_No_Answer: false,
             }};
             let resp = await fetch('/api/annotate', {{
                 method: 'POST',
@@ -229,9 +245,12 @@ def render_annotation_page():
                 index: index,
                 ContextualRelevance_winner: document.getElementById('ContextualRelevance_winner').value,
                 PedagogicalQuality_winner: document.getElementById('PedagogicalQuality_winner').value,
-                Actionability_winner: document.getElementById('Actionability_winner').value,
                 CommunicationStyle_winner: document.getElementById('CommunicationStyle_winner').value,
-                Comments: document.getElementById('Comments').value
+                Comments: document.getElementById('Comments').value,
+                LLM_1_Too_Wordy: document.getElementById('llm1_issue_too_wordy').checked,
+                LLM_1_No_Answer: document.getElementById('llm1_issue_no_answer').checked,
+                LLM_2_Too_Wordy: document.getElementById('llm2_issue_too_wordy').checked,
+                LLM_2_No_Answer: document.getElementById('llm2_issue_no_answer').checked,
             }};
             let resp = await fetch('/api/annotate', {{
                 method: 'POST',
@@ -256,7 +275,6 @@ def render_pairwise_rubric(get_choice):
     rubric = [
         ('ContextualRelevance', 'Contextual Relevance', 'How well does the answer fit the local educational environment?'),
         ('PedagogicalQuality', 'Pedagogical Quality', 'How effective is the teaching advice?'),
-        ('Actionability', 'Actionability', 'How easy is it for a teacher to implement the advice?'),
         ('CommunicationStyle', 'Communication Style', 'How does the chatbot communicate (Tone, Persona)?')
     ]
     btns = ["<div class='flex flex-col gap-4'>"]
@@ -273,6 +291,34 @@ def render_pairwise_rubric(get_choice):
         )
     btns.append("</div>")
     return "".join(btns)
+
+def render_common_issues_rubric(get_issue_checked):
+    issues = [
+        ('Too_Wordy', 'Too Wordy'),
+        ('No_Answer', 'No Answer')
+    ]
+    # Use flex-col to stack the issue boxes vertically in the right-hand column
+    html = ["<div class='flex flex-col gap-6'>"]
+    # LLM 1 Issues
+    html.append("<div><div class='font-semibold mb-2'>LLM 1 common issues <span class='text-gray-500 text-xs'>(optional)</span></div><div class='flex flex-col gap-1'>")
+    for issue_key, issue_label in issues:
+        html.append(
+            f"<label class='flex items-center gap-2'>"
+            f"<input type='checkbox' id='llm1_issue_{issue_key.lower()}' name='llm1_issue_{issue_key.lower()}' class='h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' {get_issue_checked(1, issue_key)}>"
+            f"<span>{issue_label}</span></label>"
+        )
+    html.append("</div></div>")
+    # LLM 2 Issues
+    html.append("<div><div class='font-semibold mb-2'>LLM 2 common issues <span class='text-gray-500 text-xs'>(optional)</span></div><div class='flex flex-col gap-1'>")
+    for issue_key, issue_label in issues:
+        html.append(
+            f"<label class='flex items-center gap-2'>"
+            f"<input type='checkbox' id='llm2_issue_{issue_key.lower()}' name='llm2_issue_{issue_key.lower()}' class='h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' {get_issue_checked(2, issue_key)}>"
+            f"<span>{issue_label}</span></label>"
+        )
+    html.append("</div></div>")
+    html.append("</div>")
+    return "".join(html)
 
 def render_previous_button(idx):
     if idx > 0:
@@ -447,9 +493,12 @@ async def api_annotate(request: Request):
     ann = {
         'ContextualRelevance_winner': data.get('ContextualRelevance_winner',''),
         'PedagogicalQuality_winner': data.get('PedagogicalQuality_winner',''),
-        'Actionability_winner': data.get('Actionability_winner',''),
         'CommunicationStyle_winner': data.get('CommunicationStyle_winner',''),
         'Comments': data.get('Comments',''),
+        'LLM_1_Too_Wordy': data.get('LLM_1_Too_Wordy', False),
+        'LLM_1_No_Answer': data.get('LLM_1_No_Answer', False),
+        'LLM_2_Too_Wordy': data.get('LLM_2_Too_Wordy', False),
+        'LLM_2_No_Answer': data.get('LLM_2_No_Answer', False),
     }
     if idx < len(session_state['annotations']):
         session_state['annotations'][idx] = ann
@@ -569,4 +618,4 @@ def download():
     })
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
