@@ -8,7 +8,28 @@ import json
 
 app = FastAPI()
 
-# Global session state
+# --- Configuration ---
+# Define the criteria for pairwise comparison on the left side of the UI.
+# Format: (InternalKey, DisplayLabel, Description)
+PAIRWISE_CRITERIA = [
+    ('ContextualRelevance', 'Contextual Relevance', 'How well does the answer fit the local educational environment?'),
+    ('PedagogicalQuality', 'Pedagogical Quality', 'How effective is the teaching advice?'),
+    ('CommunicationStyle', 'Communication Style', 'How does the chatbot communicate (Tone, Persona)?'),
+    ('FollowupQuality', 'Follow-up Quality', 'How good is the follow-up question(s) for the specific query?'),
+    ('OverallQuality', 'Overall Quality🏆', 'Which answer would you like to receive?')
+]
+# Get a list of the internal keys for validation purposes.
+REQUIRED_CRITERIA_KEYS = [key for key, _, _ in PAIRWISE_CRITERIA]
+
+# Define the common issues for the right side of the UI.
+# Format: (InternalKey, DisplayLabel)
+COMMON_ISSUES = [
+    ('Too_Wordy', 'Too Wordy (answer should be more concise)'),
+    ('No_Answer', 'No answer but should have been answered'),
+    ('Should_Not_Answer', 'Answer but should NOT have been answered')
+]
+
+# --- Global Session State ---
 def get_default_state():
     return {
         'data_rows': [],
@@ -20,8 +41,10 @@ def get_default_state():
     }
 session_state = get_default_state()
 
-# Helper: Render upload page
+# --- HTML Rendering Helpers ---
+
 def render_upload_page(error=None):
+    # Renders the initial file upload page.
     return f"""
     <!DOCTYPE html>
     <html lang='en'>
@@ -45,25 +68,28 @@ def render_upload_page(error=None):
     </html>
     """
 
-# Helper: Render annotation page
 def render_annotation_page():
+    # Renders the main annotation interface.
     idx = session_state['current_index']
     total = session_state['total_rows']
-    data = session_state['data_rows'][idx] if total > 0 else {'UserQuestion': '', 'ModelAnswer1': '', 'ModelAnswer2': ''}
+    data = session_state['data_rows'][idx] if total > 0 else {}
     annotations = session_state['annotations']
     prev_ann = annotations[idx] if idx < len(annotations) else {}
+    
     def get_choice(crit):
-        return prev_ann.get(crit + '_winner', '')
+        return prev_ann.get(f'{crit}_winner', '')
+    
     def get_comment():
         return prev_ann.get('Comments', '')
+        
     def get_issue_checked(llm, issue):
         return 'checked' if prev_ann.get(f'LLM_{llm}_{issue}', False) else ''
 
-    # Calculate progress - count only completed annotations (not skipped)
-    completed_count = sum(1 for ann in session_state['annotations'] if any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'CommunicationStyle']))
-    skipped_count = sum(1 for ann in session_state['annotations'] if not any(ann.get(f'{crit}_winner') for crit in ['ContextualRelevance', 'PedagogicalQuality', 'CommunicationStyle']) and any(ann))
+    # Calculate progress based on completed annotations.
+    completed_count = sum(1 for ann in session_state['annotations'] if all(ann.get(f'{key}_winner') for key in REQUIRED_CRITERIA_KEYS))
+    skipped_count = sum(1 for ann in session_state['annotations'] if not all(ann.get(f'{key}_winner') for key in REQUIRED_CRITERIA_KEYS) and any(ann))
     progress_percentage = (completed_count / total * 100) if total > 0 else 0
-    remaining = total - completed_count
+    
     return f"""
     <!DOCTYPE html>
     <html lang='en'>
@@ -105,7 +131,6 @@ def render_annotation_page():
             </div>
             <form id='annotationForm' class='bg-white rounded-lg shadow p-6 flex flex-col gap-6'>
                 <input type='hidden' name='index' id='index' value='{idx}'>
-                
                 <div class='grid grid-cols-1 md:grid-cols-3 gap-x-8 gap-y-6'>
                     <div class='md:col-span-2'>
                         {render_pairwise_rubric(get_choice)}
@@ -114,16 +139,15 @@ def render_annotation_page():
                         {render_common_issues_rubric(get_issue_checked)}
                     </div>
                 </div>
-
                 <div class='border-t pt-6'>
                     <label for='Comments' class='block font-semibold mb-1'>Comments <span class='text-gray-500 text-xs'>(optional)</span></label>
-                    <textarea id='Comments' name='Comments' class='border rounded p-2 w-full text-sm' rows='2' placeholder='Add any comments here (optional)'>{get_comment()}</textarea>
+                    <textarea id='Comments' name='Comments' class='border rounded p-2 w-full text-sm' rows='2' placeholder='Add any comments here...'>{get_comment()}</textarea>
                 </div>
                 <div class='flex justify-between items-center mt-4'>
                     {render_previous_button(idx)}
                     <div class='flex gap-2'>
                         <button type='button' onclick='skipAnnotation()' class='bg-yellow-500 text-white px-4 py-2 rounded hover:bg-yellow-600'>Skip</button>
-                        <button type='button' onclick='submitAnnotation()' id='nextButton' class='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600' disabled>Next</button>
+                        <button type='button' onclick='submitAnnotation()' id='nextButton' class='bg-green-500 text-white px-4 py-2 rounded hover:bg-green-600 opacity-50 cursor-not-allowed' disabled>Next</button>
                     </div>
                     <button type='button' onclick='showFinishConfirm()' class='bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600'>Finish and Save</button>
                 </div>
@@ -138,484 +162,312 @@ def render_annotation_page():
                 </div>
             </div>
         </div>
+        
         <script>
-        let choices = {{}};
-        function handlePairwiseClick(criterion, value) {{
-            choices[criterion] = value;
-            let btn1 = document.getElementById(criterion + '_LLM_1');
-            let btn2 = document.getElementById(criterion + '_LLM_2');
-            let btnNoPref = document.getElementById(criterion + '_NO_PREF');
-            btn1.classList.remove('ring-2','ring-green-500','ring-blue-500','ring-gray-400');
-            btn2.classList.remove('ring-2','ring-green-500','ring-blue-500','ring-gray-400');
-            btnNoPref.classList.remove('ring-2','ring-green-500','ring-blue-500','ring-gray-400');
-            if (value === 'LLM_1') {{
-                btn1.classList.add('ring-2','ring-green-500');
-            }} else if (value === 'LLM_2') {{
-                btn2.classList.add('ring-2','ring-blue-500');
-            }} else if (value === 'NO_PREF') {{
-                btnNoPref.classList.add('ring-2','ring-gray-400');
+            // Store criteria keys from backend for JS validation
+            const requiredCriteria = {json.dumps(REQUIRED_CRITERIA_KEYS)};
+            const allIssueKeys = {json.dumps([key for key, _ in COMMON_ISSUES])};
+
+            function handlePairwiseClick(criterion, value) {{
+                // Logic to handle button clicks for pairwise comparison and update UI
+                ['LLM_1', 'LLM_2', 'NO_PREF'].forEach(val => {{
+                    document.getElementById(`${{criterion}}_${{val}}`).classList.remove('ring-2', 'ring-green-500', 'ring-blue-500', 'ring-gray-400');
+                }});
+                const ringColor = value === 'LLM_1' ? 'ring-green-500' : value === 'LLM_2' ? 'ring-blue-500' : 'ring-gray-400';
+                document.getElementById(`${{criterion}}_${{value}}`).classList.add('ring-2', ringColor);
+                document.getElementById(`${{criterion}}_winner`).value = value;
+                checkNextButton();
             }}
-            document.getElementById(criterion + '_winner').value = value;
-            checkNextButton();
-        }}
-        function checkNextButton() {{
-            const cr = document.getElementById('ContextualRelevance_winner').value;
-            const pq = document.getElementById('PedagogicalQuality_winner').value;
-            const cs = document.getElementById('CommunicationStyle_winner').value;
-            const nextButton = document.getElementById('nextButton');
-            if (cr && pq && cs) {{
-                nextButton.disabled = false;
-                nextButton.classList.remove('opacity-50', 'cursor-not-allowed');
-                nextButton.classList.add('hover:bg-green-600');
-            }} else {{
-                nextButton.disabled = true;
-                nextButton.classList.add('opacity-50', 'cursor-not-allowed');
-                nextButton.classList.remove('hover:bg-green-600');
+
+            function checkNextButton() {{
+                // Enable 'Next' button only when all required criteria are selected
+                const allSelected = requiredCriteria.every(crit => document.getElementById(`${{crit}}_winner`).value);
+                const nextButton = document.getElementById('nextButton');
+                if (allSelected) {{
+                    nextButton.disabled = false;
+                    nextButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                }} else {{
+                    nextButton.disabled = true;
+                    nextButton.classList.add('opacity-50', 'cursor-not-allowed');
+                }}
             }}
-        }}
-        document.addEventListener('DOMContentLoaded', function() {{
-            checkNextButton();
-        }});
-        async function submitAnnotation() {{
-            let index = parseInt(document.getElementById('index').value);
-            let payload = {{
-                index: index,
-                ContextualRelevance_winner: document.getElementById('ContextualRelevance_winner').value,
-                PedagogicalQuality_winner: document.getElementById('PedagogicalQuality_winner').value,
-                CommunicationStyle_winner: document.getElementById('CommunicationStyle_winner').value,
-                Comments: document.getElementById('Comments').value,
-                LLM_1_Too_Wordy: document.getElementById('llm1_issue_too_wordy').checked,
-                LLM_1_No_Answer: document.getElementById('llm1_issue_no_answer').checked,
-                LLM_2_Too_Wordy: document.getElementById('llm2_issue_too_wordy').checked,
-                LLM_2_No_Answer: document.getElementById('llm2_issue_no_answer').checked,
-            }};
-            let resp = await fetch('/api/annotate', {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify(payload)
-            }});
-            let data = await resp.json();
-            if (data.status === 'success') {{
+            
+            // Run on page load to set initial button state
+            document.addEventListener('DOMContentLoaded', checkNextButton);
+
+            function getFormData() {{
+                // Helper to gather all form data into a single payload object
+                const index = parseInt(document.getElementById('index').value);
+                let payload = {{ index: index, Comments: document.getElementById('Comments').value }};
+                
+                // Get pairwise winners
+                requiredCriteria.forEach(crit => {{
+                    payload[`${{crit}}_winner`] = document.getElementById(`${{crit}}_winner`).value;
+                }});
+
+                // Get common issues for both LLMs
+                [1, 2].forEach(llmNum => {{
+                    allIssueKeys.forEach(issueKey => {{
+                        payload[`LLM_${{llmNum}}_${{issueKey}}`] = document.getElementById(`llm${{llmNum}}_issue_${{issueKey.toLowerCase()}}`).checked;
+                    }});
+                }});
+                return payload;
+            }}
+            
+            async function submitAnnotation() {{
+                // Submit the current annotation and move to the next item
+                const payload = getFormData();
+                await postAnnotation(payload);
                 navigate('next');
             }}
-        }}
-        async function navigate(direction) {{
-            let resp = await fetch('/api/navigate', {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify({{direction: direction}})
-            }});
-            let data = await resp.json();
-            if (data.index !== undefined) {{
-                window.location.href = '/annotate';
-            }}
-        }}
-        async function skipAnnotation() {{
-            let index = parseInt(document.getElementById('index').value);
-            let payload = {{
-                index: index,
-                ContextualRelevance_winner: '',
-                PedagogicalQuality_winner: '',
-                CommunicationStyle_winner: '',
-                Comments: '',
-                LLM_1_Too_Wordy: false,
-                LLM_1_No_Answer: false,
-                LLM_2_Too_Wordy: false,
-                LLM_2_No_Answer: false,
-            }};
-            let resp = await fetch('/api/annotate', {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify(payload)
-            }});
-            let data = await resp.json();
-            if (data.status === 'success') {{
+            
+            async function skipAnnotation() {{
+                // Skip the current item by submitting an empty annotation
+                const index = parseInt(document.getElementById('index').value);
+                let payload = {{ index: index }};
+                requiredCriteria.forEach(crit => payload[`${{crit}}_winner`] = '');
+                [1, 2].forEach(llmNum => allIssueKeys.forEach(key => payload[`LLM_${{llmNum}}_${{key}}`] = false));
+                payload['Comments'] = '';
+                await postAnnotation(payload);
                 navigate('next');
             }}
-        }}
-        // Show confirmation modal for Finish and Save
-        function showFinishConfirm() {{
-            document.getElementById('finishConfirmModal').classList.remove('hidden');
-        }}
-        // If user confirms, proceed to finish
-        async function confirmFinishYes() {{
-            document.getElementById('finishConfirmModal').classList.add('hidden');
-            let index = parseInt(document.getElementById('index').value);
-            let payload = {{
-                index: index,
-                ContextualRelevance_winner: document.getElementById('ContextualRelevance_winner').value,
-                PedagogicalQuality_winner: document.getElementById('PedagogicalQuality_winner').value,
-                CommunicationStyle_winner: document.getElementById('CommunicationStyle_winner').value,
-                Comments: document.getElementById('Comments').value,
-                LLM_1_Too_Wordy: document.getElementById('llm1_issue_too_wordy').checked,
-                LLM_1_No_Answer: document.getElementById('llm1_issue_no_answer').checked,
-                LLM_2_Too_Wordy: document.getElementById('llm2_issue_too_wordy').checked,
-                LLM_2_No_Answer: document.getElementById('llm2_issue_no_answer').checked,
-            }};
-            let resp = await fetch('/api/annotate', {{
-                method: 'POST',
-                headers: {{'Content-Type': 'application/json'}},
-                body: JSON.stringify(payload)
-            }});
-            let data = await resp.json();
-            if (data.status === 'success') {{
+
+            async function confirmFinishYes() {{
+                // Save the current annotation and redirect to the finish page
+                document.getElementById('finishConfirmModal').classList.add('hidden');
+                const payload = getFormData();
+                await postAnnotation(payload);
                 window.location.href = '/finish';
             }}
-        }}
-        // If user cancels, hide modal and stay on annotation
-        function confirmFinishNo() {{
-            document.getElementById('finishConfirmModal').classList.add('hidden');
-        }}
+
+            function confirmFinishNo() {{
+                // Hide the confirmation modal
+                document.getElementById('finishConfirmModal').classList.add('hidden');
+            }}
+            
+            function showFinishConfirm() {{
+                // Show the confirmation modal
+                document.getElementById('finishConfirmModal').classList.remove('hidden');
+            }}
+
+            async function postAnnotation(payload) {{
+                // Central function to POST annotation data to the backend
+                await fetch('/api/annotate', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify(payload)
+                }});
+            }}
+            
+            async function navigate(direction) {{
+                // Navigate between previous/next items
+                await fetch('/api/navigate', {{
+                    method: 'POST',
+                    headers: {{'Content-Type': 'application/json'}},
+                    body: JSON.stringify({{direction: direction}})
+                }});
+                window.location.href = '/annotate';
+            }}
         </script>
     </body>
     </html>
     """
 
 def render_pairwise_rubric(get_choice):
-    rubric = [
-        ('ContextualRelevance', 'Contextual Relevance', 'How well does the answer fit the local educational environment?'),
-        ('PedagogicalQuality', 'Pedagogical Quality', 'How effective is the teaching advice?'),
-        ('CommunicationStyle', 'Communication Style', 'How does the chatbot communicate (Tone, Persona)?')
-    ]
+    # Renders the left-side criteria using the PAIRWISE_CRITERIA config.
     btns = ["<div class='flex flex-col gap-4'>"]
-    for crit, label, expl in rubric:
+    for crit, label, expl in PAIRWISE_CRITERIA:
         btns.append(
-            f"<div>"
-            f"<div class='mb-1 font-semibold'>{label}: <span class='font-normal text-gray-600'>{expl}</span></div>"
-            f"<div class='flex items-center gap-4 mb-2'>"
-            f"<input type='hidden' id='{crit}_winner' name='{crit}_winner' value='{get_choice(crit)}'>"
-            f"<button type='button' id='{crit}_LLM_1' onclick=\"handlePairwiseClick('{crit}','LLM_1')\" class='px-4 py-1 rounded border bg-green-50 border-green-300 {'ring-2 ring-green-500' if get_choice(crit)=='LLM_1' else ''}'>LLM 1</button>"
-            f"<button type='button' id='{crit}_LLM_2' onclick=\"handlePairwiseClick('{crit}','LLM_2')\" class='px-4 py-1 rounded border bg-blue-50 border-blue-300 {'ring-2 ring-blue-500' if get_choice(crit)=='LLM_2' else ''}'>LLM 2</button>"
-            f"<button type='button' id='{crit}_NO_PREF' onclick=\"handlePairwiseClick('{crit}','NO_PREF')\" class='px-4 py-1 rounded border bg-gray-100 border-gray-400 text-gray-500 {'ring-2 ring-gray-400' if get_choice(crit)=='NO_PREF' else ''}'>No preference</button>"
-            f"</div></div>"
+            f"""
+            <div>
+                <div class='mb-1 font-semibold'>{label}: <span class='font-normal text-gray-600'>{expl}</span></div>
+                <div class='flex items-center gap-4 mb-2'>
+                    <input type='hidden' id='{crit}_winner' name='{crit}_winner' value='{get_choice(crit)}'>
+                    <button type='button' id='{crit}_LLM_1' onclick="handlePairwiseClick('{crit}','LLM_1')" class='px-4 py-1 rounded border bg-green-50 border-green-300 {'ring-2 ring-green-500' if get_choice(crit)=='LLM_1' else ''}'>LLM 1</button>
+                    <button type='button' id='{crit}_LLM_2' onclick="handlePairwiseClick('{crit}','LLM_2')" class='px-4 py-1 rounded border bg-blue-50 border-blue-300 {'ring-2 ring-blue-500' if get_choice(crit)=='LLM_2' else ''}'>LLM 2</button>
+                    <button type='button' id='{crit}_NO_PREF' onclick="handlePairwiseClick('{crit}','NO_PREF')" class='px-4 py-1 rounded border bg-gray-100 border-gray-400 text-gray-500 {'ring-2 ring-gray-400' if get_choice(crit)=='NO_PREF' else ''}'>No preference</button>
+                </div>
+            </div>
+            """
         )
     btns.append("</div>")
     return "".join(btns)
 
 def render_common_issues_rubric(get_issue_checked):
-    issues = [
-        ('Too_Wordy', 'Too Wordy'),
-        ('No_Answer', 'No Answer')
-    ]
-    # Use flex-col to stack the issue boxes vertically in the right-hand column
+    # Renders the right-side common issues using the COMMON_ISSUES config.
     html = ["<div class='flex flex-col gap-6'>"]
-    # LLM 1 Issues
-    html.append("<div><div class='font-semibold mb-2'>LLM 1 common issues <span class='text-gray-500 text-xs'>(optional)</span></div><div class='flex flex-col gap-1'>")
-    for issue_key, issue_label in issues:
-        html.append(
-            f"<label class='flex items-center gap-2'>"
-            f"<input type='checkbox' id='llm1_issue_{issue_key.lower()}' name='llm1_issue_{issue_key.lower()}' class='h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' {get_issue_checked(1, issue_key)}>"
-            f"<span>{issue_label}</span></label>"
-        )
-    html.append("</div></div>")
-    # LLM 2 Issues
-    html.append("<div><div class='font-semibold mb-2'>LLM 2 common issues <span class='text-gray-500 text-xs'>(optional)</span></div><div class='flex flex-col gap-1'>")
-    for issue_key, issue_label in issues:
-        html.append(
-            f"<label class='flex items-center gap-2'>"
-            f"<input type='checkbox' id='llm2_issue_{issue_key.lower()}' name='llm2_issue_{issue_key.lower()}' class='h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' {get_issue_checked(2, issue_key)}>"
-            f"<span>{issue_label}</span></label>"
-        )
-    html.append("</div></div>")
+    for llm_num in [1, 2]:
+        html.append(f"<div><div class='font-semibold mb-2'>LLM {llm_num} common issues <span class='text-gray-500 text-xs'>(optional)</span></div><div class='flex flex-col gap-1'>")
+        for issue_key, issue_label in COMMON_ISSUES:
+            html.append(
+                f"""
+                <label class='flex items-center gap-2'>
+                    <input type='checkbox' id='llm{llm_num}_issue_{issue_key.lower()}' name='llm{llm_num}_issue_{issue_key.lower()}' class='h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500' {get_issue_checked(llm_num, issue_key)}>
+                    <span>{issue_label}</span>
+                </label>
+                """
+            )
+        html.append("</div></div>")
     html.append("</div>")
     return "".join(html)
 
 def render_previous_button(idx):
+    # Renders the 'Previous' button if not on the first item.
     if idx > 0:
         return '<button type="button" onclick="navigate(\'previous\')" class="bg-gray-300 text-gray-700 px-4 py-2 rounded hover:bg-gray-400">Previous</button>'
-    return '<div></div>'
+    return '<div></div>' # Placeholder for alignment
 
-# Helper: Render finish page
+# Other rendering helpers (finish, save, goodbye pages) remain largely the same.
 def render_finish_page():
-    return f"""
-    <!DOCTYPE html>
-    <html lang='en'>
-    <head>
-        <meta charset='UTF-8'>
-        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-        <title>Finish Annotation</title>
-        <script src='https://cdn.tailwindcss.com'></script>
-    </head>
-    <body class='bg-gray-100 min-h-screen flex items-center justify-center'>
-        <div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
-            <h1 class='text-2xl font-bold mb-6 text-center'>Finish Annotation</h1>
-            <div class='flex flex-col gap-4'>
-                <button onclick="window.location.href='/quit'" class='bg-red-500 text-white rounded p-3 hover:bg-red-600'>Quit without saving</button>
-                <button onclick="window.location.href='/save'" class='bg-green-500 text-white rounded p-3 hover:bg-green-600'>Save</button>
-            </div>
-        </div>
-    </body>
-    </html>
+    return """
+    <!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>Finish Annotation</title><script src='https://cdn.tailwindcss.com'></script></head>
+    <body class='bg-gray-100 min-h-screen flex items-center justify-center'><div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
+    <h1 class='text-2xl font-bold mb-6 text-center'>Finish Annotation</h1><div class='flex flex-col gap-4'>
+    <button onclick="window.location.href='/quit'" class='bg-red-500 text-white rounded p-3 hover:bg-red-600'>Quit without saving</button>
+    <button onclick="window.location.href='/save'" class='bg-green-500 text-white rounded p-3 hover:bg-green-600'>Save Annotations</button>
+    </div></div></body></html>
     """
 
-# Helper: Render save page
 def render_save_page():
-    # Check if already saved
-    if session_state.get('file_saved', False):
-        return render_save_success_page()
-    
-    return f"""
-    <!DOCTYPE html>
-    <html lang='en'>
-    <head>
-        <meta charset='UTF-8'>
-        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-        <title>Save Results</title>
-        <script src='https://cdn.tailwindcss.com'></script>
-    </head>
-    <body class='bg-gray-100 min-h-screen flex items-center justify-center'>
-        <div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
-            <h1 class='text-2xl font-bold mb-6 text-center'>Save Results</h1>
-            <form action='/save-file' method='post' class='flex flex-col gap-4'>
-                <label class='block text-gray-700'>Filename (without .csv extension)</label>
-                <input type='text' name='filename' id='filename' required class='border rounded p-2' placeholder='Enter filename...'>
-                <button type='submit' id='saveButton' class='bg-gray-400 text-white rounded p-3 cursor-not-allowed' disabled>Save</button>
-            </form>
-        </div>
-        <script>
-        document.getElementById('filename').addEventListener('input', function() {{
-            const filename = this.value.trim();
-            const saveButton = document.getElementById('saveButton');
-            
-            if (filename.length > 0) {{
-                saveButton.disabled = false;
-                saveButton.classList.remove('bg-gray-400', 'cursor-not-allowed');
-                saveButton.classList.add('bg-blue-500', 'hover:bg-blue-600');
-            }} else {{
-                saveButton.disabled = true;
-                saveButton.classList.remove('bg-blue-500', 'hover:bg-blue-600');
-                saveButton.classList.add('bg-gray-400', 'cursor-not-allowed');
-            }}
-        }});
-        </script>
-    </body>
-    </html>
+    return """
+    <!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>Save Results</title><script src='https://cdn.tailwindcss.com'></script></head>
+    <body class='bg-gray-100 min-h-screen flex items-center justify-center'><div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
+    <h1 class='text-2xl font-bold mb-6 text-center'>Save Results</h1><form action='/save-file' method='post' class='flex flex-col gap-4'>
+    <label class='block text-gray-700'>Filename (e.g., my_annotations)</label>
+    <input type='text' name='filename' id='filename' required class='border rounded p-2' placeholder='Enter filename...'>
+    <button type='submit' id='saveButton' class='bg-gray-400 text-white rounded p-3 cursor-not-allowed' disabled>Save and Download CSV</button>
+    </form></div><script>
+    document.getElementById('filename').addEventListener('input', function() {
+        const btn = document.getElementById('saveButton');
+        if (this.value.trim().length > 0) {
+            btn.disabled = false;
+            btn.classList.remove('bg-gray-400', 'cursor-not-allowed');
+            btn.classList.add('bg-blue-500', 'hover:bg-blue-600');
+        } else {
+            btn.disabled = true;
+            btn.classList.add('bg-gray-400', 'cursor-not-allowed');
+            btn.classList.remove('bg-blue-500', 'hover:bg-blue-600');
+        }
+    });
+    </script></body></html>
     """
 
-# Helper: Render goodbye page
 def render_goodbye_page(action="saved"):
     message = "Your annotations have been saved successfully!" if action == "saved" else "You quit without saving. Your annotations have been lost."
     return f"""
-    <!DOCTYPE html>
-    <html lang='en'>
-    <head>
-        <meta charset='UTF-8'>
-        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-        <title>Goodbye</title>
-        <script src='https://cdn.tailwindcss.com'></script>
-    </head>
-    <body class='bg-gray-100 min-h-screen flex items-center justify-center'>
-        <div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
-            <h1 class='text-2xl font-bold mb-6 text-center'>Goodbye!</h1>
-            <p class='text-gray-600 mb-6 text-center'>{message}</p>
-            <div class='flex justify-center'>
-                <button onclick="window.location.href='/restart'" class='bg-blue-500 text-white rounded p-3 hover:bg-blue-600'>Start New Annotation</button>
-            </div>
-        </div>
-    </body>
-    </html>
+    <!DOCTYPE html><html lang='en'><head><meta charset='UTF-8'><title>Goodbye</title><script src='https://cdn.tailwindcss.com'></script></head>
+    <body class='bg-gray-100 min-h-screen flex items-center justify-center'><div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
+    <h1 class='text-2xl font-bold mb-6 text-center'>Goodbye!</h1><p class='text-gray-600 mb-6 text-center'>{message}</p>
+    <div class='flex justify-center'><button onclick="window.location.href='/restart'" class='bg-blue-500 text-white rounded p-3 hover:bg-blue-600'>Start New Annotation</button></div>
+    </div></body></html>
     """
 
-# Helper: Render save success page
-def render_save_success_page():
-    filename = session_state.get('saved_filename', 'annotated_results')
-    return f"""
-    <!DOCTYPE html>
-    <html lang='en'>
-    <head>
-        <meta charset='UTF-8'>
-        <meta name='viewport' content='width=device-width, initial-scale=1.0'>
-        <title>File Saved Successfully</title>
-        <script src='https://cdn.tailwindcss.com'></script>
-    </head>
-    <body class='bg-gray-100 min-h-screen flex items-center justify-center'>
-        <div class='bg-white shadow-lg rounded-lg p-8 w-full max-w-md'>
-            <h1 class='text-2xl font-bold mb-6 text-center'>File Saved Successfully!</h1>
-            <p class='text-gray-600 mb-6 text-center'>Your annotated results have been saved as "{filename}.csv"</p>
-            <div class='flex justify-center'>
-                <button onclick="window.location.href='/restart'" class='bg-blue-500 text-white rounded p-3 hover:bg-blue-600'>Start New Annotation</button>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
+# --- FastAPI Endpoints ---
 
 @app.get("/", response_class=HTMLResponse)
 def index():
+    # Main entry point. Shows upload page or redirects to annotation.
     if not session_state['data_rows']:
         return render_upload_page()
-    else:
-        return RedirectResponse('/annotate', status_code=302)
+    return RedirectResponse('/annotate', status_code=302)
 
 @app.post("/upload")
 async def upload(file: UploadFile = File(...)):
+    # Handles file upload and session initialization.
     content = await file.read()
     try:
         df = pd.read_csv(io.StringIO(content.decode('utf-8')))
     except Exception:
-        return HTMLResponse(render_upload_page(error='Invalid CSV file. Please check the file format.'), status_code=400)
+        return HTMLResponse(render_upload_page(error='Invalid CSV file.'), status_code=400)
     
-    # Check for required columns with exact name matching
-    required_columns = ['UserQuestion', 'ModelAnswer1', 'ModelAnswer2']
-    missing_columns = []
-    available_columns = list(df.columns)
-    
-    for col in required_columns:
-        if col not in df.columns:
-            missing_columns.append(col)
-    
-    if missing_columns:
-        error_msg = f'CSV file is missing required columns: {", ".join(missing_columns)}. Available columns: {", ".join(available_columns)}'
+    required_cols = ['UserQuestion', 'ModelAnswer1', 'ModelAnswer2']
+    if not all(col in df.columns for col in required_cols):
+        error_msg = f'CSV is missing required columns: {", ".join(required_cols)}. Found: {", ".join(df.columns)}'
         return HTMLResponse(render_upload_page(error=error_msg), status_code=400)
     
-    # Check if columns have data
-    if df.empty:
-        return HTMLResponse(render_upload_page(error='CSV file is empty. Please upload a file with data.'), status_code=400)
-    
     session_state['data_rows'] = df.to_dict(orient='records')
-    session_state['annotations'] = [{} for _ in range(len(session_state['data_rows']))]
+    session_state['annotations'] = [{} for _ in range(len(df))]
     session_state['current_index'] = 0
-    session_state['total_rows'] = len(session_state['data_rows'])
+    session_state['total_rows'] = len(df)
     session_state['columns'] = list(df.columns)
     session_state['filename'] = file.filename
     return RedirectResponse('/annotate', status_code=302)
 
 @app.get("/annotate", response_class=HTMLResponse)
 def annotate():
+    # Displays the main annotation page.
     if not session_state['data_rows']:
         return RedirectResponse('/', status_code=302)
     return render_annotation_page()
 
 @app.post("/api/annotate")
 async def api_annotate(request: Request):
+    # API endpoint to save a single annotation to the session state.
     data = await request.json()
     idx = data.get('index', 0)
-    ann = {
-        'ContextualRelevance_winner': data.get('ContextualRelevance_winner',''),
-        'PedagogicalQuality_winner': data.get('PedagogicalQuality_winner',''),
-        'CommunicationStyle_winner': data.get('CommunicationStyle_winner',''),
-        'Comments': data.get('Comments',''),
-        'LLM_1_Too_Wordy': data.get('LLM_1_Too_Wordy', False),
-        'LLM_1_No_Answer': data.get('LLM_1_No_Answer', False),
-        'LLM_2_Too_Wordy': data.get('LLM_2_Too_Wordy', False),
-        'LLM_2_No_Answer': data.get('LLM_2_No_Answer', False),
-    }
-    if idx < len(session_state['annotations']):
+    
+    ann = {'Comments': data.get('Comments', '')}
+    # Add pairwise winners
+    for key in REQUIRED_CRITERIA_KEYS:
+        ann[f'{key}_winner'] = data.get(f'{key}_winner', '')
+    # Add common issues
+    for llm_num in [1, 2]:
+        for issue_key, _ in COMMON_ISSUES:
+            ann[f'LLM_{llm_num}_{issue_key}'] = data.get(f'LLM_{llm_num}_{issue_key}', False)
+            
+    if 0 <= idx < len(session_state['annotations']):
         session_state['annotations'][idx] = ann
-    else:
-        session_state['annotations'].append(ann)
+    
     return {"status": "success"}
 
 @app.post("/api/navigate")
 async def api_navigate(request: Request):
+    # API endpoint to handle moving between previous/next items.
     data = await request.json()
     direction = data.get('direction')
-    idx = session_state['current_index']
-    total = session_state['total_rows']
-    if direction == 'next':
-        if idx < total - 1:
-            session_state['current_index'] += 1
-    elif direction == 'previous':
-        if idx > 0:
-            session_state['current_index'] -= 1
-    idx = session_state['current_index']
-    row = session_state['data_rows'][idx] if total > 0 else {'UserQuestion': '', 'ModelAnswer1': '', 'ModelAnswer2': ''}
-    return {'index': idx, 'question': row.get('UserQuestion',''), 'answer': row.get('ModelAnswer1','')}
+    if direction == 'next' and session_state['current_index'] < session_state['total_rows'] - 1:
+        session_state['current_index'] += 1
+    elif direction == 'previous' and session_state['current_index'] > 0:
+        session_state['current_index'] -= 1
+    return {"status": "success", "index": session_state['current_index']}
 
 @app.get("/finish", response_class=HTMLResponse)
 def finish():
-    if not session_state['data_rows']:
-        return RedirectResponse('/', status_code=302)
     return render_finish_page()
 
 @app.get("/save", response_class=HTMLResponse)
 def save():
-    if not session_state['data_rows']:
-        return RedirectResponse('/', status_code=302)
     return render_save_page()
 
-@app.post("/save-file")
+@app.post("/save-file", response_class=StreamingResponse)
 async def save_file(filename: str = Form(...)):
-    if not session_state['data_rows']:
-        return RedirectResponse('/', status_code=302)
-    
-    # Check if already saved to prevent double saving
-    if session_state.get('file_saved', False):
-        return RedirectResponse('/save-success', status_code=302)
-    
+    # Compiles annotations and data into a CSV file for download.
     df = pd.DataFrame(session_state['data_rows'])
     ann_df = pd.DataFrame(session_state['annotations'])
-    out = pd.concat([df, ann_df], axis=1)
+    out_df = pd.concat([df, ann_df], axis=1)
+    
     buf = io.StringIO()
-    out.to_csv(buf, index=False)
+    out_df.to_csv(buf, index=False)
     buf.seek(0)
-    # Store filename and mark as saved
-    session_state['saved_filename'] = filename
-    session_state['file_saved'] = True
-    # Return the actual CSV file for download
+    
+    safe_filename = "".join(c for c in filename if c.isalnum() or c in (' ', '_')).rstrip()
     return StreamingResponse(iter([buf.getvalue()]), media_type='text/csv', headers={
-        'Content-Disposition': f'attachment; filename="{filename}.csv"'
+        'Content-Disposition': f'attachment; filename="{safe_filename}.csv"'
     })
-
-@app.get("/save-file")
-def save_file_get():
-    if not session_state['data_rows']:
-        return RedirectResponse('/', status_code=302)
-    df = pd.DataFrame(session_state['data_rows'])
-    ann_df = pd.DataFrame(session_state['annotations'])
-    out = pd.concat([df, ann_df], axis=1)
-    buf = io.StringIO()
-    out.to_csv(buf, index=False)
-    buf.seek(0)
-    filename = session_state.get('saved_filename', 'annotated_results')
-    return StreamingResponse(iter([buf.getvalue()]), media_type='text/csv', headers={
-        'Content-Disposition': f'attachment; filename="{filename}.csv"'
-    })
-
-@app.get("/quit")
-def quit():
-    # Clear session state
-    session_state.clear()
-    session_state.update(get_default_state())
-    return RedirectResponse('/goodbye?action=quit', status_code=302)
-
-@app.get("/save-success", response_class=HTMLResponse)
-def save_success():
-    if not session_state.get('saved_filename'):
-        return RedirectResponse('/', status_code=302)
-    return render_save_success_page()
-
-@app.get("/download-success")
-def download_success():
-    # This endpoint is called after the file download completes
-    # It shows the success page
-    return render_save_success_page()
 
 @app.get("/restart")
 def restart():
-    # Clear session state completely
-    session_state.clear()
-    session_state.update(get_default_state())
+    # Clears the session and restarts the application.
+    global session_state
+    session_state = get_default_state()
     return RedirectResponse('/', status_code=302)
 
-@app.get("/goodbye")
-def goodbye(action: str = "saved"):
-    return render_goodbye_page(action)
-
-@app.get("/download")
-def download():
-    if not session_state['data_rows']:
-        return RedirectResponse('/', status_code=302)
-    df = pd.DataFrame(session_state['data_rows'])
-    ann_df = pd.DataFrame(session_state['annotations'])
-    out = pd.concat([df, ann_df], axis=1)
-    buf = io.StringIO()
-    out.to_csv(buf, index=False)
-    buf.seek(0)
-    filename = session_state.get('filename', 'results')
-    return StreamingResponse(iter([buf.getvalue()]), media_type='text/csv', headers={
-        'Content-Disposition': f'attachment; filename="annotated_{filename}.csv"'
-    })
+@app.get("/quit")
+def quit():
+    # Quits the session and shows a goodbye message.
+    global session_state
+    session_state = get_default_state()
+    return render_goodbye_page(action="quit")
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
