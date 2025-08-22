@@ -1,104 +1,96 @@
-# LLM Output Annotation Tool
+Here is the complete content for your `README.md` file. You can copy the text below and save it in a file named `README.md`.
 
-A web-based tool for annotating Large Language Model (LLM) outputs with a WhatsApp-style interface. Built with FastAPI and Tailwind CSS, this tool provides an intuitive way to evaluate LLM responses across multiple criteria.
+````markdown
+# LLM Pairwise Evaluation Tool
 
-## 🚀 Features
+This repository contains a web-based tool for the pairwise comparison of Large Language Model (LLM) outputs. Built with **FastAPI** and **Tailwind CSS**, this application provides an intuitive, chat-style interface to efficiently evaluate two LLM responses side-by-side against a defined set of criteria.
 
-### Core Functionality
-- **WhatsApp-style Interface**: Clean, familiar chat-like display for user questions and LLM responses
-- **Multi-criteria Annotation**: Rate responses on four key dimensions, each with three options
-- **Progress Tracking**: Real-time progress bar and completion statistics
-- **Skip Functionality**: Skip items and return to them later without affecting progress
-- **Flexible Navigation**: Move between items with Previous/Next buttons
+The tool is designed for researchers, developers, and data annotators who need to systematically compare the performance of two different models, or two versions of the same model, on a given set of prompts.
 
-## 📋 Requirements
+***
 
-- Python 3.7+
-- FastAPI
-- Uvicorn
-- Pandas
-- Python-multipart
+## 🚀 Core Features
 
-## 🛠️ Installation
+* **Side-by-Side UI**: Displays answers from two LLMs in a clean, two-column layout for easy comparison.
+* **Multi-Criteria Rubric**: Evaluate model performance across five distinct criteria, choosing which model was better or if there was no preference.
+* **Common Issue Flagging**: Quickly tag common problems in each model's response, such as being too wordy or failing to answer.
+* **Progress Tracking**: A visual progress bar shows how many items have been completed, and a counter tracks skipped items.
+* **Simple Data Handling**: Upload a CSV file to start and download your work as a new, annotated CSV upon completion.
+* **Easy Navigation**: Move forward and backward through your dataset with "Next" and "Previous" buttons.
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/Maximelel/annotate_localized_outputs.git
-   ```
-   ```bash
-   cd annotate_localized_outputs
-   ```
+***
 
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 🛠️ Installation and Usage
 
-3. **Access the application**:
-   Open your browser and go to `http://localhost:8000`
+Follow these steps to get the annotation tool running on your local machine.
 
-## 🆚 Single vs. Pairwise Evaluation Modes
+### 1. Requirements
 
-This tool supports two modes for evaluating LLM outputs:
+Make sure you have Python 3.7+ installed. The required Python libraries are:
+* `fastapi`
+* `uvicorn`
+* `pandas`
+* `python-multipart`
 
-### 1. Single LLM Evaluation (`main_single.py`)
-- **Purpose:** Evaluate the output of one LLM at a time.
-- **How to run:**
-  ```bash
-  uvicorn main_single:app --reload
-  ```
-- **CSV Format:**
-  - `UserQuestion`: The user's input/question
-  - `ModelAnswer`: The LLM's response
-- **UI:**
-  - For each question, you see the user question and the LLM's answer.
-  - You rate the answer on four criteria (Contextual Relevance, Pedagogical Quality, Actionability, Communication Style), each with three options.
+### 2. Setup
 
-### 2. Pairwise LLM Evaluation (`main_pairs.py`)
-- **Purpose:** Compare the outputs of two LLMs side by side for each question.
-- **How to run:**
-  ```bash
-  uvicorn main_pairs:app --reload
-  ```
-- **CSV Format:**
-  - `UserQuestion`: The user's input/question
-  - `ModelAnswer1`: The first LLM's response
-  - `ModelAnswer2`: The second LLM's response
-- **UI:**
-  - For each question, you see the user question and both LLMs' answers in two columns.
-  - For each of the four criteria, you select which LLM performed better (LLM 1 or LLM 2).
-  - You can also leave a comment for each question.
+First, clone the repository to your local machine:
+```bash
+git clone [https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git)
+cd your-repo-name
+````
 
-Choose the mode that matches your evaluation needs!
+Next, install the required dependencies. It's recommended to do this in a virtual environment.
 
-## 🎯 Annotation Criteria
+```bash
+pip install -r requirements.txt
+```
 
-- **Contextual Relevance**: How well does the response fit the user's context? (Excellent, Good, Poor)
-- **Pedagogical Quality**: Is the response educationally sound? (Effective, Acceptable, Ineffective)
-- **Actionability**: Are the suggestions practical and actionable? (Very Actionable, Somewhat Actionable, Not Actionable)
-- **Communication Style**: Is the tone appropriate? (Supportive & Encouraging, Neutral & Factual, Condescending or Dismissive)
+### 3\. Running the Application
 
-## 🚨 Error Handling
+To start the web server, run the following command from the root directory of the project:
 
-The application includes comprehensive error handling:
-- **CSV Validation**: Checks for required columns and data
-- **File Format**: Validates CSV structure and encoding
-- **Session Management**: Handles missing or corrupted session data
-- **User Feedback**: Clear error messages with actionable guidance
+```bash
+uvicorn main_pairs:app --reload
+```
+-----
 
-## 🔄 Workflow
+## 📖 How to Use the Tool
 
-1. **Upload**: Select and validate CSV file
-2. **Annotate**: Rate responses on three criteria
-3. **Navigate**: Move between items with Previous/Next
-4. **Skip**: Mark items for later review
-5. **Save**: Download annotated results as CSV
-6. **Restart**: Begin new annotation session
+### 1\. Prepare Your Data
 
-## 📝 Output Format
+Your input data must be a **CSV file** containing the following three columns:
 
-The exported CSV includes:
-- Original columns: `UserQuestion`, `ModelAnswer`
-- Annotation columns: `ContextualRelevance_rating`, `PedagogicalQuality_rating`, `Actionability_rating`, `CommunicationStyle_rating`, `Comments`
+  * `UserQuestion`: The prompt or question given to the LLMs.
+  * `ModelAnswer1`: The full response from the first LLM.
+  * `ModelAnswer2`: The full response from the second LLM.
 
-**Happy Annotation! 🎉** 
+*Optional columns like `AssignedCountry` can be included and will be displayed in the UI if present.*
+
+### 2\. Upload and Annotate
+
+1.  **Upload**: On the main page, you'll be prompted to upload your CSV file.
+2.  **Annotate**: Once uploaded, the annotation interface will appear.
+      * The **user's question** is displayed at the top.
+      * **LLM 1's answer** is on the left (green), and **LLM 2's answer** is on the right (blue).
+      * Use the **Pairwise Comparison** rubric on the left to select which model performed better for each criterion (`LLM 1`, `LLM 2`, or `No preference`).
+      * The **"Next"** button will only become active after all five criteria have been selected.
+3.  **Flag Issues**: On the right, you can optionally check boxes to flag common issues for each LLM.
+4.  **Add Comments**: A text box is available at the bottom for any additional notes.
+
+### 3\. Annotation Criteria
+
+You will evaluate the models based on the following five criteria:
+
+1.  **Contextual Relevance**: How well does the answer fit the local educational environment?
+2.  **Pedagogical Quality**: How effective is the teaching advice?
+3.  **Communication Style**: How does the chatbot communicate (Tone, Persona)?
+4.  **Follow-up Quality**: How good is the follow-up question(s) for the specific query?
+5.  **Overall Quality 🏆**: Which answer would you prefer to receive?
+
+### 4\. Saving Your Work
+
+When you are finished, click the **"Finish and Save"** button. You will be asked to provide a filename, and your browser will download the complete, annotated dataset as a new CSV file. The output file will contain all the original columns from your input file, plus new columns for each annotation decision, flagged issue, and your comments.
+
+```
+```
