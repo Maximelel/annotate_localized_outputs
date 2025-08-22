@@ -1,6 +1,3 @@
-Here is the complete content for your `README.md` file. You can copy the text below and save it in a file named `README.md`.
-
-````markdown
 # LLM Pairwise Evaluation Tool
 
 This repository contains a web-based tool for the pairwise comparison of Large Language Model (LLM) outputs. Built with **FastAPI** and **Tailwind CSS**, this application provides an intuitive, chat-style interface to efficiently evaluate two LLM responses side-by-side against a defined set of criteria.
@@ -11,7 +8,7 @@ The tool is designed for researchers, developers, and data annotators who need t
 
 ## 🚀 Core Features
 
-* **Side-by-Side UI**: Displays answers from two LLMs in a clean, two-column layout for easy comparison.
+* **WhatsApp-style Interface**: Displays answers from two LLMs in a clean, two-column layout for easy comparison.
 * **Multi-Criteria Rubric**: Evaluate model performance across five distinct criteria, choosing which model was better or if there was no preference.
 * **Common Issue Flagging**: Quickly tag common problems in each model's response, such as being too wordy or failing to answer.
 * **Progress Tracking**: A visual progress bar shows how many items have been completed, and a counter tracks skipped items.
@@ -36,9 +33,11 @@ Make sure you have Python 3.7+ installed. The required Python libraries are:
 
 First, clone the repository to your local machine:
 ```bash
-git clone [https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git)
-cd your-repo-name
-````
+git clone https://github.com/Maximelel/annotate_localized_outputs.git
+```
+```bash
+cd annotate_localized_outputs
+```
 
 Next, install the required dependencies. It's recommended to do this in a virtual environment.
 
@@ -91,6 +90,3 @@ You will evaluate the models based on the following five criteria:
 ### 4\. Saving Your Work
 
 When you are finished, click the **"Finish and Save"** button. You will be asked to provide a filename, and your browser will download the complete, annotated dataset as a new CSV file. The output file will contain all the original columns from your input file, plus new columns for each annotation decision, flagged issue, and your comments.
-
-```
-```
